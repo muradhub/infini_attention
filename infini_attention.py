@@ -8,7 +8,7 @@ def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
 
-class InfinyAttention(tf.keras.layers.Layer):
+class InfiniAttention(tf.keras.layers.Layer):
   def __init__(self, num_heads, d_model):
     super(InfinyAttention, self).__init__()
 
