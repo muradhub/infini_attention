@@ -10,7 +10,7 @@ def sigmoid(x):
 
 class InfiniAttention(tf.keras.layers.Layer):
   def __init__(self, num_heads, d_model):
-    super(InfinyAttention, self).__init__()
+    super(InfiniAttention, self).__init__()
 
     self.num_heads = num_heads
     self.d_model = d_model
