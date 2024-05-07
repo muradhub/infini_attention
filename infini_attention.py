@@ -8,19 +8,15 @@ def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
 
-class InfiniAttention(tf.keras.layers.Layer):
+class InfinyAttention(tf.keras.layers.Layer):
   def __init__(self, num_heads, d_model):
-    super(InfiniAttention, self).__init__()
+    super(InfinyAttention, self).__init__()
 
     self.num_heads = num_heads
     self.d_model = d_model
 
     assert d_model % self.num_heads == 0
     self.depth = d_model // self.num_heads
-
-    self.Memory = tf.random.uniform((num_heads, num_heads), minval=0, maxval=0.1)
-    self.z = tf.random.uniform((self.num_heads, ), minval=0, maxval=0.1)
-    self.A = None
 
     self.query_dense = tf.keras.layers.Dense(d_model)
     self.key_dense = tf.keras.layers.Dense(d_model)
@@ -45,25 +41,28 @@ class InfiniAttention(tf.keras.layers.Layer):
     output = tf.matmul(attention_weights, v)
     return output
 
-  def infini_attention(self, query, key, value, mask, delta_rule):
+  def infini_attention(self, query, key, value, mask, batch_size, delta_rule):
     local_attention_values = []
     sigma_query = sigma(query)
     sigma_key = sigma(key)
+    Memory = tf.random.uniform((self.num_heads, self.num_heads), minval=0, maxval=0.1)
+    z = tf.random.uniform((self.num_heads, ), minval=0, maxval=0.1)
+    beta = tf.random.uniform((batch_size, self.depth, self.seq_length, self.num_heads), minval=0, maxval=0.1)
     for i in range(self.seq_count):
       local_sigma_query = sigma_query[:, i, :, :, :]
       local_sigma_key = sigma_key[:, i, :, :, :]
 
-      self.A = tf.matmul(local_sigma_query, self.Memory) / (local_sigma_query * self.z)
+      A = tf.matmul(local_sigma_query, Memory) / (local_sigma_query * z)
 
       val = value[:, i, :, :, :]
       if delta_rule:
-        val -= tf.matmul(local_sigma_key, self.Memory) / (local_sigma_key * self.z)
+        val -= tf.matmul(local_sigma_key, Memory) / (local_sigma_key * z)
 
-      self.Memory += tf.matmul(tf.transpose(local_sigma_key, perm=[0, 1, 3, 2]), val)
-      self.z += tf.reduce_sum(local_sigma_key, axis=0)
+      Memory += tf.matmul(tf.transpose(local_sigma_key, perm=[0, 1, 3, 2]), val)
+      z += tf.reduce_sum(local_sigma_key, axis=0)
 
       dot_attention = self.local_scaled_attention(query[:, i, :, :, :], key[:, i, :, :, :], value[:, i, :, :, :], mask)
-      local_attention = tf.multiply(sigmoid(self.beta), self.A) + tf.multiply(1 - sigmoid(self.beta), dot_attention)
+      local_attention = tf.multiply(sigmoid(beta), A) + tf.multiply(1 - sigmoid(beta), dot_attention)
       local_attention_values.append(local_attention)
 
     O = tf.concat(local_attention_values, axis=1)
@@ -75,7 +74,6 @@ class InfiniAttention(tf.keras.layers.Layer):
     length = tf.shape(query)[1]
     self.seq_count = seq_count
     self.seq_length = length // seq_count
-    self.beta = tf.random.uniform((batch_size, self.depth, self.seq_length, self.num_heads), minval=0, maxval=0.1)
 
     query = self.query_dense(query)
     key = self.key_dense(key)
@@ -85,7 +83,7 @@ class InfiniAttention(tf.keras.layers.Layer):
     key = self.split_heads(key, batch_size)
     value = self.split_heads(value, batch_size)
 
-    attention_output = self.infini_attention(query, key, value, mask, delta_rule)
+    attention_output = self.infini_attention(query, key, value, mask, batch_size, delta_rule)
     attention_output = tf.reshape(attention_output, (batch_size, self.d_model, length))
     attention_output = tf.transpose(attention_output, perm=[0, 2, 1])
     final_output = self.dense(attention_output)
