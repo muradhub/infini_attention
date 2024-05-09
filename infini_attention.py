@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+import matplotlib.pyplot as plt
 
 def sigma(x, alpha=1):
   return np.where(x >= 0, x, alpha * (np.exp(x) - 1))
@@ -21,13 +22,14 @@ class InfiniAttention(tf.keras.layers.Layer):
     self.query_dense = tf.keras.layers.Dense(d_model)
     self.key_dense = tf.keras.layers.Dense(d_model)
     self.value_dense = tf.keras.layers.Dense(d_model)
+    self.beta = tf.Variable(initial_value=1.0, trainable=True)
 
     self.dense = tf.keras.layers.Dense(d_model)
 
   def split_heads(self, inputs, batch_size):
     length = tf.shape(inputs)[1]
     inputs = tf.reshape(inputs, (batch_size, self.seq_count, self.seq_length, self.num_heads, self.depth))
-    return tf.transpose(inputs, perm=[0, 1, 4, 2, 3])
+    return tf.transpose(inputs, perm=[0, 3, 1, 2, 4])
 
   def local_scaled_attention(self, q, k, v, mask):
     matmul_qk = tf.matmul(q, k, transpose_b=True)
@@ -45,24 +47,25 @@ class InfiniAttention(tf.keras.layers.Layer):
     local_attention_values = []
     sigma_query = sigma(query)
     sigma_key = sigma(key)
-    Memory = tf.random.uniform((self.num_heads, self.num_heads), minval=0, maxval=0.1)
-    z = tf.random.uniform((self.num_heads, ), minval=0, maxval=0.1)
-    beta = tf.random.uniform((batch_size, self.depth, self.seq_length, self.num_heads), minval=0, maxval=0.1)
+    Memory = tf.zeros((self.num_heads, self.depth, self.depth))
+    z = tf.zeros((self.num_heads, self.depth, 1))
     for i in range(self.seq_count):
-      local_sigma_query = sigma_query[:, i, :, :, :]
-      local_sigma_key = sigma_key[:, i, :, :, :]
+      local_sigma_query = sigma_query[:, :, i, :, :]
+      local_sigma_key = sigma_key[:, :, i, :, :]
 
-      A = tf.matmul(local_sigma_query, Memory) / (local_sigma_query * z)
 
-      val = value[:, i, :, :, :]
+      A = tf.matmul(local_sigma_query, Memory) / (tf.matmul(local_sigma_query, z) + 1e-6)
+
+
+      val = value[:, :, i, :, :]
       if delta_rule:
-        val -= tf.matmul(local_sigma_key, Memory) / (local_sigma_key * z)
+        val -= tf.matmul(local_sigma_key, Memory) / (tf.matmul(local_sigma_key, z) + 1e-6)
 
       Memory += tf.matmul(tf.transpose(local_sigma_key, perm=[0, 1, 3, 2]), val)
-      z += tf.reduce_sum(local_sigma_key, axis=0)
+      z += tf.reduce_sum(local_sigma_key, axis=-2, keepdims=True)
 
-      dot_attention = self.local_scaled_attention(query[:, i, :, :, :], key[:, i, :, :, :], value[:, i, :, :, :], mask)
-      local_attention = tf.multiply(sigmoid(beta), A) + tf.multiply(1 - sigmoid(beta), dot_attention)
+      dot_attention = self.local_scaled_attention(query[:, :, i, :, :], key[:, :, i, :, :], value[:, :, i, :, :], mask)
+      local_attention = sigmoid(self.beta) * A + (1 - sigmoid(self.beta)) * dot_attention
       local_attention_values.append(local_attention)
 
     O = tf.concat(local_attention_values, axis=1)
