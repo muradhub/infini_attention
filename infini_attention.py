@@ -31,20 +31,22 @@ class InfiniAttention(tf.keras.layers.Layer):
     inputs = tf.reshape(inputs, (batch_size, self.seq_count, self.seq_length, self.num_heads, self.depth))
     return tf.transpose(inputs, perm=[0, 3, 1, 2, 4])
 
-  def local_scaled_attention(self, q, k, v, mask):
+  def local_scaled_attention(self, q, k, v, local_seq_length, mask):
     matmul_qk = tf.matmul(q, k, transpose_b=True)
     dk = tf.cast(tf.shape(k)[-1], tf.float32)
     scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
 
-    if mask is not None:
+    if mask:
+      mask = 1 - tf.linalg.band_part(tf.ones((local_seq_length, local_seq_length)), -1, 0)
       scaled_attention_logits += (mask * 1e-9)
 
     attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
     output = tf.matmul(attention_weights, v)
     return output
 
-  def infini_attention(self, query, key, value, mask, batch_size, delta_rule):
+  def infini_attention(self, query, key, value, mask=False, delta_rule=False):
     local_attention_values = []
+    batch_size, _, _, local_seq_length, _ = tf.shape(query)
     sigma_query = sigma(query)
     sigma_key = sigma(key)
     Memory = tf.zeros((self.num_heads, self.depth, self.depth))
@@ -58,13 +60,14 @@ class InfiniAttention(tf.keras.layers.Layer):
 
 
       val = value[:, :, i, :, :]
+
       if delta_rule:
         val -= tf.matmul(local_sigma_key, Memory) / (tf.matmul(local_sigma_key, z) + 1e-6)
 
       Memory += tf.matmul(tf.transpose(local_sigma_key, perm=[0, 1, 3, 2]), val)
       z += tf.reduce_sum(local_sigma_key, axis=-2, keepdims=True)
 
-      dot_attention = self.local_scaled_attention(query[:, :, i, :, :], key[:, :, i, :, :], value[:, :, i, :, :], mask)
+      dot_attention = self.local_scaled_attention(query[:, :, i, :, :], key[:, :, i, :, :], value[:, :, i, :, :], local_seq_length, mask)
       local_attention = sigmoid(self.beta) * A + (1 - sigmoid(self.beta)) * dot_attention
       local_attention_values.append(local_attention)
 
@@ -86,7 +89,7 @@ class InfiniAttention(tf.keras.layers.Layer):
     key = self.split_heads(key, batch_size)
     value = self.split_heads(value, batch_size)
 
-    attention_output = self.infini_attention(query, key, value, mask, batch_size, delta_rule)
+    attention_output = self.infini_attention(query, key, value, mask, delta_rule)
     attention_output = tf.reshape(attention_output, (batch_size, self.d_model, length))
     attention_output = tf.transpose(attention_output, perm=[0, 2, 1])
     final_output = self.dense(attention_output)
