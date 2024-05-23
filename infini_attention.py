@@ -22,7 +22,7 @@ class InfiniAttention(tf.keras.layers.Layer):
     self.query_dense = tf.keras.layers.Dense(d_model)
     self.key_dense = tf.keras.layers.Dense(d_model)
     self.value_dense = tf.keras.layers.Dense(d_model)
-    self.beta = tf.Variable(initial_value=1.0, trainable=True)
+    self.beta = tf.Variable(tf.ones((1,), dtype=tf.float32), trainable=True)
 
     self.dense = tf.keras.layers.Dense(d_model)
 
